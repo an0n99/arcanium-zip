@@ -38,6 +38,11 @@ import { toast } from "@/hooks/use-toast"
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { auth } from "@/lib/firebaseConfig";
+import { onAuthStateChanged } from "firebase/auth"
+import { addDoc, collection, updateDoc } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage } from "@/lib/firebaseConfig";
 
 const formSchema = z.object({
   projectName: z.string().min(2, {
@@ -82,6 +87,23 @@ export default function CreateProjectPage() {
   const [generationProgress, setGenerationProgress] = useState(0)
   const [generatedScope, setGeneratedScope] = useState<any>(null)
   const [scopeAdjustments, setScopeAdjustments] = useState("")
+
+  // const router = useRouter();
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (!currentUser) {
+        router.push("/login");
+      } else {
+        setUser(currentUser);
+      }
+      setLoading(false);
+    });
+    
+    return () => unsubscribe();
+  }, [router]);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -372,6 +394,13 @@ export default function CreateProjectPage() {
           scopeAdjustments,
         }
 
+        const projectRef = await addDoc(collection(db, "projects"), newProject);
+        const fileUrls = await uploadFiles(files, projectRef.id);
+
+        await updateDoc(projectRef, {
+          fileUrls: fileUrls
+        })
+
         // In a real app, you would send this to your API
         console.log("New project created:", newProject)
 
@@ -399,6 +428,17 @@ export default function CreateProjectPage() {
     }
   }
 
+  const uploadFiles = async(files, projectId) => {
+    const uploadPromises = files.map(async (file) => {
+      const storageRef = ref(storage, `projects/${user.uid}/${projectId}/${file.name}`)
+      await uploadBytes(storageRef, file);
+      const downloadUrl = await getDownloadURL(storageRef);
+      return { name: file.name, url: downloadUrl }
+    });
+
+    return Promise.all(uploadPromises);
+  }
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       setFiles(Array.from(e.target.files))
@@ -418,7 +458,14 @@ export default function CreateProjectPage() {
     }
     return types[type] || "Renovation"
   }
-
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Loader2 className="h-8 w-8 animate-spin" />
+        <span className="ml-2">Loading...</span>
+      </div>
+    )
+  }
   return (
     <div className="max-w-3xl mx-auto">
       <h1 className="text-3xl font-bold tracking-tight mb-6">Create New Project</h1>
